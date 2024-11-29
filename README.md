@@ -27,7 +27,7 @@ Use state-of-the-art algorithms like Decision Trees, Random Forests, and Gradien
 **Why This Matters:**
 As the PJM grid faces rising demand and increasing complexity, this project equips energy stakeholders with the tools to predict, analyze, and mitigate risks. From identifying high-risk nodes to optimizing grid reliability, the insights from this analysis can drive better decision-making and improve market outcomes.
 
-**Acknowledgments**
+# Acknowledgments:
 This project utilized PJM Data Miner 2 for accessing historical grid data. The following resources were instrumental in helping understand and use the API:
 
 - Robert Zwink DataMiner GitHub Repository (https://github.com/rzwink/pjm_dataminer)
