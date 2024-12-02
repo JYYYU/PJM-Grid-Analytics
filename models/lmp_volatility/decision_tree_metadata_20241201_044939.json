@@ -1,0 +1,31 @@
+{
+    "best_rmse": 1.6589291678926057,
+    "test_rmse": 2.0211481214591545,
+    "save_path": "./models/lmp_volatility/decision_tree_lmp_volatility_20241201_044939.pkl",
+    "training_time": "20241201_044939",
+    "features": [
+        "pnode_id",
+        "hour",
+        "day_of_week",
+        "season",
+        "lmp_abs_delta_lag1",
+        "lmp_abs_delta_lag24",
+        "near_emergency_lag1",
+        "capacity_margin_lag24",
+        "lmp_volatility_lag6",
+        "region_stress_ratio_roll24",
+        "outage_intensity_roll24",
+        "capacity_margin_roll24",
+        "region_stress_x_capacity_margin",
+        "outage_intensity_x_capacity_margin",
+        "outage_intensity_x_region_stress",
+        "near_emergency_x_capacity_margin",
+        "region_catWestern"
+    ],
+    "date_range": {
+        "train_start": "2020-07-01",
+        "train_end": "2023-10-07",
+        "test_start": "2023-10-07",
+        "test_end": "2024-07-31"
+    }
+}

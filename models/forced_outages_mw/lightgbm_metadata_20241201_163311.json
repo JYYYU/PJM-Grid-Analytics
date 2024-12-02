@@ -1,0 +1,28 @@
+{
+    "best_rmse": 764.8136360515556,
+    "test_rmse": 825.0043281412107,
+    "save_path": "./models/forced_outages_mw/lightgbm_forced_outages_mw_20241201_163311.pkl",
+    "training_time": "20241201_163311",
+    "features": [
+        "month",
+        "day_of_week",
+        "is_weekend",
+        "season",
+        "forced_outages_lag1",
+        "forced_outages_lag7",
+        "outage_intensity_lag1",
+        "region_stress_ratio_roll7",
+        "outage_intensity_roll7",
+        "forced_outages_roll7",
+        "capacity_margin_roll7",
+        "outage_intensity_x_region_stress",
+        "capacity_margin_x_region_stress",
+        "region_catWestern"
+    ],
+    "date_range": {
+        "train_start": "2020-07-08",
+        "train_end": "2023-10-08",
+        "test_start": "2023-10-09",
+        "test_end": "2024-07-31"
+    }
+}
