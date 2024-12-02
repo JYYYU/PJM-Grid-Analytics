@@ -3,25 +3,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import re
+import os
+import joblib
+import json
+from datetime import datetime
 import logging
-from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-from lightgbm import LGBMClassifier
+from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import RandomizedSearchCV
-from sklearn.metrics import (
-    classification_report,
-    confusion_matrix,
-    ConfusionMatrixDisplay,
-)
-from sklearn.model_selection import TimeSeriesSplit
+from lightgbm import LGBMClassifier, LGBMRegressor
+from sklearn.metrics import classification_report, mean_squared_error
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
+
+#######################################################################################################################################
+### Merge Data ###
+#######################################################################################################################################
 
 
-# Merge Data #
 def merge_lmp_gen_data(lmp_df, gen_cap_df, zone_to_region_df):
     """Merges day-ahead hourly LMPs (mnt_ftr_zonal_lmps) and daily generation capacity (day_gen_capacity) together.
 
@@ -153,7 +152,11 @@ def merge_historical_data(lmp_df, gen_cap_df, outage_df, zone_to_region_df):
     return second_merge
 
 
-# Feature Generation #
+#######################################################################################################################################
+### Feature Generation ###
+#######################################################################################################################################
+
+
 def create_capacity_margin(df):
     """Takes economic max and total committed of daily PJM available generation capacity and generates the new feature "capacity_margin".
 
@@ -359,8 +362,99 @@ def create_lmp_volatility(df, n_hours_window=24):
         )
 
 
-########################################################################################################################################################################################################
-# Data Handle #
+#######################################################################################################################################
+### Data Handle ###
+#######################################################################################################################################
+
+
+def outlier_df_iqr(df, col_name, multiplier=1.5):
+    """Outlier detection based on IQR x multiplier.
+
+    Args:
+        df (pd.DataFrame): Dataframe containings data for outlier detection.
+        col_name (str): Column to be used in outlier detection.
+        multiplier (float, optional): _description_. Defaults to 1.5.
+
+    Returns:
+        pd.Dataframe: A dataframe containing the outlier points.
+    """
+    if (not isinstance(multiplier, int)) or (not isinstance(multiplier, float)):
+        multiplier = 1.5
+    Q1 = df[col_name].quantile(0.25)
+    Q3 = df[col_name].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - multiplier * IQR
+    upper_bound = Q3 + multiplier * IQR
+    outlier_df = df[(df[col_name] > upper_bound) | (df[col_name] < lower_bound)].copy()
+    return outlier_df.reset_index(drop=True)
+
+
+def outlier_df_by_dollar_amt(df, col_name, dollar_amt=50):
+    """Outlier detection based on dollar amount. This is specifically used for LMP features.
+
+    Args:
+        df (pd.DataFrame): Dataframe containings data for outlier detection.
+        col_name (str): Column to be used in outlier detection.
+        dollar_amt (int, optional): Dollar amount threshold to determine outliers. Defaults to $50.
+
+    Returns:
+        pd.Dataframe: A dataframe containing the outlier points.
+    """
+    if (not isinstance(dollar_amt, int)) or (not isinstance(dollar_amt, float)):
+        dollar_amt = 50
+    outlier_df = df[np.abs(df[col_name]) > dollar_amt]
+    return outlier_df.reset_index(drop=True)
+
+
+def pnode_lmp_outliers(
+    df,
+    *args,
+    method=outlier_df_iqr,
+    region_filter=None,
+    region_col="region",
+    top_n_nodes=10,
+    col_names=["pnode_name", "region"],
+):
+    """Produces the top_n_nodes based on a outlier detection method user selects.
+
+    Args:
+        df (pd.DataFrame): Dataframe containings data for outlier detection.
+        method (callable, optional): Outlier detection method, which is either outlier_df_iqr or outlier_df_by_dollar_amt. Defaults to outlier_df_iqr.
+        region_filter (_type_, optional): List of region(s) to filter for. Defaults to None.
+        region_col (str, optional): Column representing regions or categories. Defaults to "region".
+        top_n_nodes (int, optional): Top n nodes user wants to see. Defaults to 10.
+        col_names (list, optional): Features to display in the final results. Defaults to ["pnode_name", "region"].
+
+    Raises:
+        ValueError: Region filter provided yielded no data.
+        ValueError: Outlier detection method provided does not exist.
+    """
+    filtered_df = df.copy()
+    if region_filter:
+        if isinstance(region_filter, str):
+            region_filter = re.split(r"[,\s;]+", region_filter)
+        filtered_df = filtered_df[
+            filtered_df[region_col].isin(region_filter)
+        ].reset_index(drop=True)
+
+        if filtered_df.empty:
+            raise ValueError(
+                f"No data found for the specified regions: {region_filter}"
+            )
+    if method == outlier_df_iqr:
+        multiplier = args[0] if args else 1.5
+        outlier_df = method(df=filtered_df, col_name="lmp_delta", multiplier=multiplier)
+    elif method == outlier_df_by_dollar_amt:
+        dollar_amt = args[0] if args else 50
+        outlier_df = method(df=filtered_df, col_name="lmp_delta", dollar_amt=dollar_amt)
+    else:
+        raise ValueError(
+            "Invalid method. Use '_outlier_df_iqr' or '_outlier_df_by_dollar_amt'."
+        )
+    print(f"Top {top_n_nodes} Pricing Nodes with the Most Outliers:")
+    print(outlier_df[col_names].value_counts().head(top_n_nodes))
+
+
 def handle_forced_outage_pct_data(df):
     """Generates a new dataframe containing the daily forced outage percentage data for all regions and PJM RTO over time.
 
@@ -516,95 +610,11 @@ def handle_raw_outage_data(df):
         )
 
 
-def outlier_df_iqr(df, col_name, multiplier=1.5):
-    """Outlier detection based on IQR x multiplier.
-
-    Args:
-        df (pd.DataFrame): Dataframe containings data for outlier detection.
-        col_name (str): Column to be used in outlier detection.
-        multiplier (float, optional): _description_. Defaults to 1.5.
-
-    Returns:
-        pd.Dataframe: A dataframe containing the outlier points.
-    """
-    if (not isinstance(multiplier, int)) or (not isinstance(multiplier, float)):
-        multiplier = 1.5
-    Q1 = df[col_name].quantile(0.25)
-    Q3 = df[col_name].quantile(0.75)
-    IQR = Q3 - Q1
-    lower_bound = Q1 - multiplier * IQR
-    upper_bound = Q3 + multiplier * IQR
-    outlier_df = df[(df[col_name] > upper_bound) | (df[col_name] < lower_bound)].copy()
-    return outlier_df.reset_index(drop=True)
+#######################################################################################################################################
+### Plottings ###
+#######################################################################################################################################
 
 
-def outlier_df_by_dollar_amt(df, col_name, dollar_amt=50):
-    """Outlier detection based on dollar amount. This is specifically used for LMP features.
-
-    Args:
-        df (pd.DataFrame): Dataframe containings data for outlier detection.
-        col_name (str): Column to be used in outlier detection.
-        dollar_amt (int, optional): Dollar amount threshold to determine outliers. Defaults to $50.
-
-    Returns:
-        pd.Dataframe: A dataframe containing the outlier points.
-    """
-    if (not isinstance(dollar_amt, int)) or (not isinstance(dollar_amt, float)):
-        dollar_amt = 50
-    outlier_df = df[np.abs(df[col_name]) > dollar_amt]
-    return outlier_df.reset_index(drop=True)
-
-
-def pnode_lmp_outliers(
-    df,
-    *args,
-    method=outlier_df_iqr,
-    region_filter=None,
-    region_col="region",
-    top_n_nodes=10,
-    col_names=["pnode_name", "region"],
-):
-    """Produces the top_n_nodes based on a outlier detection method user selects.
-
-    Args:
-        df (pd.DataFrame): Dataframe containings data for outlier detection.
-        method (callable, optional): Outlier detection method, which is either outlier_df_iqr or outlier_df_by_dollar_amt. Defaults to outlier_df_iqr.
-        region_filter (_type_, optional): List of region(s) to filter for. Defaults to None.
-        region_col (str, optional): Column representing regions or categories. Defaults to "region".
-        top_n_nodes (int, optional): Top n nodes user wants to see. Defaults to 10.
-        col_names (list, optional): Features to display in the final results. Defaults to ["pnode_name", "region"].
-
-    Raises:
-        ValueError: Region filter provided yielded no data.
-        ValueError: Outlier detection method provided does not exist.
-    """
-    filtered_df = df.copy()
-    if region_filter:
-        if isinstance(region_filter, str):
-            region_filter = re.split(r"[,\s;]+", region_filter)
-        filtered_df = filtered_df[
-            filtered_df[region_col].isin(region_filter)
-        ].reset_index(drop=True)
-
-        if filtered_df.empty:
-            raise ValueError(
-                f"No data found for the specified regions: {region_filter}"
-            )
-    if method == outlier_df_iqr:
-        multiplier = args[0] if args else 1.5
-        outlier_df = method(df=filtered_df, col_name="lmp_delta", multiplier=multiplier)
-    elif method == outlier_df_by_dollar_amt:
-        dollar_amt = args[0] if args else 50
-        outlier_df = method(df=filtered_df, col_name="lmp_delta", dollar_amt=dollar_amt)
-    else:
-        raise ValueError(
-            "Invalid method. Use '_outlier_df_iqr' or '_outlier_df_by_dollar_amt'."
-        )
-    print(f"Top {top_n_nodes} Pricing Nodes with the Most Outliers:")
-    print(outlier_df[col_names].value_counts().head(top_n_nodes))
-
-
-# Plot #
 def plot_forced_outage_lmp_vol_ts(
     data,
     floor_outlier_threshold=None,
@@ -1583,10 +1593,11 @@ def plot_region_stress_ratio(
     plt.show()
 
 
+#######################################################################################################################################
 ### Modelling ###
+#######################################################################################################################################
 
 
-# Emergency Triggers#
 def emergency_trigger_set_up(df):
     """Prepares the dataset for emergency trigger prediction by engineering features, applying one-hot encoding for categorical variables, and setting up temporal structure.
 
@@ -1600,11 +1611,12 @@ def emergency_trigger_set_up(df):
     Returns:
         pd.DataFrame: Preprocessed dataset for time-series modelling with engineered features.
     """
+    # Grouping by datetime only (no region grouping)
+    et_setup_df = (
+        df.groupby(["datetime_beginning_ept"]).mean(numeric_only=True).reset_index()
+    ).copy()
 
-    et_setup_df = df.copy()
-    et_setup_df = et_setup_df.sort_values(
-        by=["datetime_beginning_ept", "region", "pnode_id"]
-    )
+    et_setup_df = et_setup_df.sort_values(by=["datetime_beginning_ept"])
 
     # add temporal features
     et_setup_df["hour"] = et_setup_df["datetime_beginning_ept"].dt.hour
@@ -1617,59 +1629,54 @@ def emergency_trigger_set_up(df):
     )  # Weekend indicator
     et_setup_df["season"] = et_setup_df["month"] % 12 // 3 + 1
 
-    # add lagged features
+    # add lagged features (hourly features)
     lags = [1, 3, 6, 24]
     for lag in lags:
-        et_setup_df[f"near_emergency_lag{lag}"] = et_setup_df.groupby(["region"])[
-            "near_emergency"
-        ].shift(lag)
-        et_setup_df[f"capacity_margin_lag{lag}"] = et_setup_df.groupby(["region"])[
-            "capacity_margin"
-        ].shift(lag)
-        et_setup_df[f"lmp_volatility_lag{lag}"] = et_setup_df.groupby(["region"])[
-            "lmp_volatility"
+        et_setup_df[f"near_emergency_lag{lag}"] = et_setup_df["near_emergency"].shift(
+            lag
+        )
+        et_setup_df[f"capacity_margin_lag{lag}"] = et_setup_df["capacity_margin"].shift(
+            lag
+        )
+        et_setup_df[f"lmp_volatility_lag{lag}"] = et_setup_df["lmp_volatility"].shift(
+            lag
+        )
+
+    # region stress ratio is daily granular so 24 minimum lag is necessary to prevent data leakage.
+    lags = [24, 48]
+    for lag in lags:
+        et_setup_df[f"region_stress_ratio_lag{lag}"] = et_setup_df[
+            "region_stress_ratio"
         ].shift(lag)
 
     # add rolling averages features
     rolling_windows = [3, 6, 24]
     for window in rolling_windows:
-        et_setup_df[f"volatility_roll{window}"] = (
-            et_setup_df.groupby(["region"])["lmp_volatility"]
-            .rolling(window, min_periods=1)
-            .mean()
-            .reset_index(0, drop=True)
+        et_setup_df[f"lmp_volatility_roll{window}"] = (
+            et_setup_df["lmp_volatility"].rolling(window, min_periods=1).mean()
         )
-        et_setup_df[f"region_stress_roll{window}"] = (
-            et_setup_df.groupby(["region"])["region_stress_ratio"]
-            .rolling(window, min_periods=1)
-            .mean()
-            .reset_index(0, drop=True)
+
+    rolling_windows = [24, 48, 168]
+    for window in rolling_windows:
+        et_setup_df[f"region_stress_ratio_roll{window}"] = (
+            et_setup_df["region_stress_ratio"].rolling(window, min_periods=1).mean()
         )
 
     et_setup_df = et_setup_df.dropna()
-    onehot_encoder = OneHotEncoder(drop="first", sparse_output=False)
-    onehot_encoded = onehot_encoder.fit_transform(et_setup_df[["region"]])
-    region_columns = [f"region_{cat}" for cat in onehot_encoder.categories_[0][1:]]
-    et_setup_df[region_columns] = onehot_encoded
-    et_setup_df.drop(columns=["region"], inplace=True)
-
     selected_features = [
         "emergency_triggered",
         "datetime_beginning_ept",
-        "pnode_id",
         "hour",
         "day_of_week",
         "season",
-        "capacity_margin",
-        "lmp_volatility",
-        "region_stress_ratio",
-        # "near_emergency",
         "near_emergency_lag1",
         "capacity_margin_lag24",
         "lmp_volatility_lag6",
-        "volatility_roll24",
-        "region_stress_roll6",
-    ] + region_columns
+        "region_stress_ratio_lag24",
+        "region_stress_ratio_lag48",
+        "lmp_volatility_roll24",
+        "region_stress_ratio_roll48",
+    ]
     et_setup_df = et_setup_df[selected_features]
 
     et_setup_df.set_index("datetime_beginning_ept", inplace=True)
@@ -1677,7 +1684,247 @@ def emergency_trigger_set_up(df):
     return et_setup_df
 
 
-def optimize_hyperparameters_et(model_name, X, y):
+def lmp_volatility_set_up(df):
+    """Prepares the dataset for LMP volatility prediction by engineering features, adding lagged and rolling features, and creating interaction terms.
+
+    Args:
+        df (pd.DataFrame): The input dataset. Includes: datetime_beginning_ept, region, pnode_id, lmp_abs_delta, near_emergency, capacity_margin, lmp_volatility, region_stress_ratio, outage_intensity.
+
+    Returns:
+        pd.DataFrame: Preprocessed dataset for time-series modelling with engineered features.
+    """
+
+    lmp_vol_setup_df = df.copy()
+    lmp_vol_setup_df = lmp_vol_setup_df.sort_values(
+        by=["datetime_beginning_ept", "region", "pnode_id"]
+    )
+
+    # add temporal features
+    lmp_vol_setup_df["hour"] = lmp_vol_setup_df["datetime_beginning_ept"].dt.hour
+    lmp_vol_setup_df["day_of_week"] = lmp_vol_setup_df[
+        "datetime_beginning_ept"
+    ].dt.dayofweek
+    lmp_vol_setup_df["month"] = lmp_vol_setup_df["datetime_beginning_ept"].dt.month
+    lmp_vol_setup_df["is_weekend"] = (lmp_vol_setup_df["day_of_week"] >= 5).astype(int)
+    lmp_vol_setup_df["season"] = lmp_vol_setup_df["month"] % 12 // 3 + 1
+
+    lags = [1, 3, 6, 24]
+    for lag in lags:
+        lmp_vol_setup_df[f"lmp_abs_delta_lag{lag}"] = lmp_vol_setup_df.groupby(
+            ["region"]
+        )["lmp_abs_delta"].shift(lag)
+        lmp_vol_setup_df[f"near_emergency_lag{lag}"] = lmp_vol_setup_df.groupby(
+            ["region"]
+        )["near_emergency"].shift(lag)
+        lmp_vol_setup_df[f"capacity_margin_lag{lag}"] = lmp_vol_setup_df.groupby(
+            ["region"]
+        )["capacity_margin"].shift(lag)
+        lmp_vol_setup_df[f"lmp_volatility_lag{lag}"] = lmp_vol_setup_df.groupby(
+            ["region"]
+        )["lmp_volatility"].shift(lag)
+
+    rolling_windows_hourly = [3, 6, 24]
+    for window in rolling_windows_hourly:
+        lmp_vol_setup_df[f"lmp_volatility_roll{window}"] = (
+            lmp_vol_setup_df.groupby(["region"])["lmp_volatility"]
+            .rolling(window, min_periods=1)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+        lmp_vol_setup_df[f"capacity_margin_roll{window}"] = (
+            lmp_vol_setup_df.groupby(["region"])["capacity_margin"]
+            .rolling(window, min_periods=1)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+
+    rolling_windows = [24, 48, 168]
+    for window in rolling_windows:
+        lmp_vol_setup_df[f"region_stress_ratio_roll{window}"] = (
+            lmp_vol_setup_df.groupby(["region"])["region_stress_ratio"]
+            .rolling(window, min_periods=1)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+        lmp_vol_setup_df[f"outage_intensity_roll{window}"] = (
+            lmp_vol_setup_df.groupby(["region"])["outage_intensity"]
+            .rolling(window, min_periods=1)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+
+    lmp_vol_setup_df["region_stress_x_capacity_margin"] = (
+        lmp_vol_setup_df["region_stress_ratio_roll24"]
+        * lmp_vol_setup_df["capacity_margin_roll24"]
+    )
+    lmp_vol_setup_df["outage_intensity_x_capacity_margin"] = (
+        lmp_vol_setup_df["outage_intensity_roll24"]
+        * lmp_vol_setup_df["capacity_margin_roll24"]
+    )
+    lmp_vol_setup_df["outage_intensity_x_region_stress"] = (
+        lmp_vol_setup_df["outage_intensity_roll24"]
+        * lmp_vol_setup_df["region_stress_ratio_roll24"]
+    )
+    lmp_vol_setup_df["near_emergency_x_capacity_margin"] = (
+        lmp_vol_setup_df["near_emergency_lag1"]
+        * lmp_vol_setup_df["capacity_margin_lag1"]
+    )
+
+    lmp_vol_setup_df = lmp_vol_setup_df.dropna()
+    onehot_encoder = OneHotEncoder(drop="first", sparse_output=False)
+    onehot_encoded = onehot_encoder.fit_transform(lmp_vol_setup_df[["region"]])
+    region_columns = [f"region_cat{cat}" for cat in onehot_encoder.categories_[0][1:]]
+    lmp_vol_setup_df[region_columns] = onehot_encoded
+    lmp_vol_setup_df.drop(columns=["region"], inplace=True)
+
+    selected_features = [
+        "lmp_volatility",
+        "datetime_beginning_ept",
+        "pnode_id",
+        "hour",
+        "day_of_week",
+        "season",
+        "lmp_abs_delta_lag1",
+        "lmp_abs_delta_lag24",
+        "near_emergency_lag1",
+        "capacity_margin_lag24",
+        "lmp_volatility_lag6",
+        "region_stress_ratio_roll24",
+        "outage_intensity_roll24",
+        "capacity_margin_roll24",
+        "region_stress_x_capacity_margin",
+        "outage_intensity_x_capacity_margin",
+        "outage_intensity_x_region_stress",
+        "near_emergency_x_capacity_margin",
+    ] + region_columns
+    lmp_vol_setup_df = lmp_vol_setup_df[selected_features]
+
+    lmp_vol_setup_df.set_index("datetime_beginning_ept", inplace=True)
+    lmp_vol_setup_df = lmp_vol_setup_df.iloc[
+        24:
+    ]  # remove 0 vol given it is the first 24 hour rolling std
+    return lmp_vol_setup_df
+
+
+def forced_outages_set_up(df):
+    """
+    Prepares the dataset for forced outage predictions by engineering features, adding lagged and rolling features, and creating interaction terms.
+
+    Args:
+        df (pd.DataFrame): The input dataset. Includes: datetime_beginning_ept, region,
+                           forced_outage_mw, region_stress_ratio, capacity_margin, outage_intensity.
+
+    Returns:
+        pd.DataFrame: Preprocessed dataset for time-series modelling with engineered features.
+    """
+    forced_outages_setup_df = (
+        df.groupby([df["datetime_beginning_ept"].dt.date, "region"])
+        .mean(numeric_only=True)
+        .reset_index()
+    ).copy()
+    forced_outages_setup_df["datetime_beginning_ept"] = pd.to_datetime(
+        forced_outages_setup_df["datetime_beginning_ept"]
+    )
+    forced_outages_setup_df = forced_outages_setup_df.sort_values(
+        by=["datetime_beginning_ept", "region"]
+    )
+
+    # Add temporal features
+    forced_outages_setup_df["day_of_week"] = forced_outages_setup_df[
+        "datetime_beginning_ept"
+    ].dt.dayofweek
+    forced_outages_setup_df["month"] = forced_outages_setup_df[
+        "datetime_beginning_ept"
+    ].dt.month
+    forced_outages_setup_df["is_weekend"] = (
+        forced_outages_setup_df["day_of_week"] >= 5
+    ).astype(int)
+    forced_outages_setup_df["season"] = forced_outages_setup_df["month"] % 12 // 3 + 1
+
+    lags = [1, 2, 7]
+    for lag in lags:
+        forced_outages_setup_df[f"forced_outages_lag{lag}"] = (
+            forced_outages_setup_df.groupby("region")["forced_outages_mw"].shift(lag)
+        )
+        forced_outages_setup_df[f"outage_intensity_lag{lag}"] = (
+            forced_outages_setup_df.groupby("region")["outage_intensity"].shift(lag)
+        )
+        forced_outages_setup_df[f"region_stress_ratio_lag{lag}"] = (
+            forced_outages_setup_df.groupby("region")["region_stress_ratio"].shift(lag)
+        )
+
+    # Add rolling averages
+    rolling_windows = [
+        2,
+        7,
+        14,
+    ]  # in days now as forced outages is a daily granular feature
+    for window in rolling_windows:
+        forced_outages_setup_df[f"forced_outages_roll{window}"] = (
+            forced_outages_setup_df.groupby("region")["forced_outages_mw"]
+            .rolling(window, min_periods=1)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+        forced_outages_setup_df[f"outage_intensity_roll{window}"] = (
+            forced_outages_setup_df.groupby("region")["outage_intensity"]
+            .rolling(window, min_periods=1)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+        forced_outages_setup_df[f"region_stress_ratio_roll{window}"] = (
+            forced_outages_setup_df.groupby("region")["region_stress_ratio"]
+            .rolling(window, min_periods=1)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+        forced_outages_setup_df[f"capacity_margin_roll{window}"] = (
+            forced_outages_setup_df.groupby("region")["capacity_margin"]
+            .rolling(window, min_periods=1)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+    # Add interaction terms
+    forced_outages_setup_df["outage_intensity_x_region_stress"] = (
+        forced_outages_setup_df["outage_intensity_roll7"]
+        * forced_outages_setup_df["region_stress_ratio_roll7"]
+    )
+    forced_outages_setup_df["capacity_margin_x_region_stress"] = (
+        forced_outages_setup_df["capacity_margin_roll7"]
+        * forced_outages_setup_df["region_stress_ratio_roll7"]
+    )
+
+    forced_outages_setup_df = forced_outages_setup_df.dropna()
+    onehot_encoder = OneHotEncoder(drop="first", sparse_output=False)
+    onehot_encoded = onehot_encoder.fit_transform(forced_outages_setup_df[["region"]])
+    region_columns = [f"region_cat{cat}" for cat in onehot_encoder.categories_[0][1:]]
+    forced_outages_setup_df[region_columns] = onehot_encoded
+    forced_outages_setup_df.drop(columns=["region"], inplace=True)
+
+    selected_features = [
+        "forced_outages_mw",
+        "datetime_beginning_ept",
+        "month",
+        "day_of_week",
+        "is_weekend",
+        "season",
+        "forced_outages_lag1",
+        "forced_outages_lag7",
+        "outage_intensity_lag1",
+        "region_stress_ratio_roll7",
+        "outage_intensity_roll7",
+        "forced_outages_roll7",
+        "capacity_margin_roll7",
+        "outage_intensity_x_region_stress",
+        "capacity_margin_x_region_stress",
+    ] + region_columns
+    forced_outages_setup_df = forced_outages_setup_df[selected_features]
+    forced_outages_setup_df.set_index("datetime_beginning_ept", inplace=True)
+
+    return forced_outages_setup_df
+
+
+def optimize_hyperparameters_classification(model_name, X, y):
     """Perform hyperparameter optimization for a given model.
 
     Args:
@@ -1716,7 +1963,7 @@ def optimize_hyperparameters_et(model_name, X, y):
             "min_samples_leaf": [1, 2, 4],
         }
         model = RandomizedSearchCV(
-            RandomForestClassifier(random_state=42),
+            RandomForestClassifier(random_state=42, n_jobs=-1),
             param_dist,
             n_iter=20,
             scoring="f1",
@@ -1745,14 +1992,266 @@ def optimize_hyperparameters_et(model_name, X, y):
     return model.best_estimator_
 
 
-def custom_time_series_split_no_overlap(data, n_splits, gap=0):
+def optimize_hyperparameters_regression(model_name, X, y):
+    """Perform hyperparameter optimization for a given regression model.
+
+    Args:
+        model_name (str): Name of the model ("decision_tree", "random_forest", "lightgbm").
+        X (pd.DataFrame): Feature data.
+        y (pd.Series): Target variable.
+
+    Returns:
+        model: Best-tuned model.
+    """
+    if model_name not in ["decision_tree", "random_forest", "lightgbm"]:
+        raise ValueError(
+            "Models available are: 'decision_tree', 'random_forest', 'lightgbm'"
+        )
+
+    if model_name == "decision_tree":
+        param_dist = {
+            "max_depth": [None, 5, 10, 20],
+            "min_samples_split": [2, 5, 10],
+            "min_samples_leaf": [1, 2, 5],
+        }
+        model = RandomizedSearchCV(
+            DecisionTreeRegressor(random_state=42),
+            param_dist,
+            n_iter=10,
+            scoring="neg_mean_squared_error",
+            cv=3,
+            random_state=42,
+        )
+
+    elif model_name == "random_forest":
+        param_dist = {
+            "n_estimators": [50, 100, 200],
+            "max_depth": [None, 10, 20, 30],
+            "min_samples_split": [2, 5, 10],
+            "min_samples_leaf": [1, 2, 4],
+        }
+        model = RandomizedSearchCV(
+            RandomForestRegressor(random_state=42, n_jobs=-1),
+            param_dist,
+            n_iter=20,
+            scoring="neg_mean_squared_error",
+            cv=3,
+            random_state=42,
+        )
+
+    elif model_name == "lightgbm":
+        param_dist = {
+            "n_estimators": [50, 100, 200],
+            "learning_rate": [0.01, 0.05, 0.1, 0.2],
+            "num_leaves": [15, 31, 63],
+            "max_depth": [-1, 10, 20],
+        }
+        model = RandomizedSearchCV(
+            LGBMRegressor(random_state=42),
+            param_dist,
+            n_iter=20,
+            scoring="neg_mean_squared_error",
+            cv=3,
+            random_state=42,
+        )
+
+    model.fit(X, y)
+    print(f"Best Parameters for {model_name}:", model.best_params_)
+    return model.best_estimator_
+
+
+def walk_forward_validation_classification(
+    data,
+    target_column,
+    model_save_path,
+    models_to_use=None,
+    n_splits=5,
+    save_best_model=True,
+    train_test_split_ratio=0.8,
+    gap=24,
+):
+    """Perform walk-forward validation with hyperparameter optimization for classification models, and saves the best models and evaluation metrics.
+
+    Args:
+        data (pd.DataFrame): Time-series data with datetime index.
+        target_column (str): Name of the target column (Ex. "emergency_triggered").
+        model_save_path (str): Path to save models.
+        models_to_use (list of str): List of model names to run, specifically ["decision_tree", "random_forest", "lightgbm"]. Defaults to None.
+        n_splits (int, optional): Number of splits for TimeSeriesSplit. Default to 5.
+        save_best_model (bool, optional): Whether to save the best model for each type. Defaults to True.
+        train_test_split_ratio (float, optional): The percentage of data allocated as the train set. Defaults to 0.8.
+        gap (int, optional): Number of unique time points (in hours) to skip between training and testing sets. Defaults to 24 hours.s
+    """
+
+    data = data.sort_index()
+    unique_times = data.index.unique()
+    split_idx = int(len(unique_times) * train_test_split_ratio)
+    train_times = unique_times[:split_idx]
+    test_times = unique_times[split_idx:]
+
+    train_data = data.loc[data.index.isin(train_times)]
+    test_data = data.loc[data.index.isin(test_times)]
+
+    X_train = train_data.drop(columns=[target_column])
+    y_train = train_data[target_column]
+    X_test = test_data.drop(columns=[target_column])
+    y_test = test_data[target_column]
+
+    model_names = models_to_use
+    for model_name in model_names:
+        best_f1_score = -1
+        best_model = None
+        splitter = custom_time_series_split_no_overlap(train_data, n_splits, gap=gap)
+        for fold, (train_idx, test_idx) in enumerate(splitter, start=1):
+            print(f"\n____ Fold {fold} - {model_name} ____")
+            X_fold_train, X_fold_test = X_train.loc[train_idx], X_train.loc[test_idx]
+            y_fold_train, y_fold_test = y_train.loc[train_idx], y_train.loc[test_idx]
+            candidate_model = optimize_hyperparameters_classification(
+                model_name, X_fold_train, y_fold_train
+            )
+            y_pred = candidate_model.predict(X_fold_test)
+            report = classification_report(y_fold_test, y_pred, output_dict=True)
+            f1_score = report["weighted avg"]["f1-score"]
+            if f1_score > best_f1_score:
+                best_f1_score = f1_score
+                best_model = candidate_model
+            print(f"Fold {fold} - {model_name}: F1-Score = {f1_score:.2f}")
+
+        if best_model:  # eval best model on hold-out test set
+            y_test_pred = best_model.predict(X_test)
+            test_report = classification_report(y_test, y_test_pred, output_dict=True)
+            test_f1_score = test_report["weighted avg"]["f1-score"]
+            print(f"Hold-out Test - {model_name}: F1-Score = {test_f1_score:.2f}")
+
+        if save_best_model and best_model:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_name = f"{model_name}_{target_column}_{timestamp}.pkl"
+            save_path = os.path.join(model_save_path, target_column, file_name)
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            joblib.dump(best_model, save_path)
+
+            metadata = {
+                "best_f1_score": best_f1_score,
+                "test_f1_score": test_f1_score,
+                "save_path": save_path,
+                "training_time": timestamp,
+                "features": X_train.columns.tolist(),
+                "date_range": {
+                    "train_start": train_times.min().strftime("%Y-%m-%d"),
+                    "train_end": train_times.max().strftime("%Y-%m-%d"),
+                    "test_start": test_times.min().strftime("%Y-%m-%d"),
+                    "test_end": test_times.max().strftime("%Y-%m-%d"),
+                },
+            }
+            metadata_path = os.path.join(
+                model_save_path,
+                target_column,
+                f"{model_name}_metadata_{timestamp}.json",
+            )
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=4)
+            print(f"Metadata for {model_name} saved at: {metadata_path}")
+
+
+def walk_forward_validation_regression(
+    data,
+    target_column,
+    model_save_path,
+    models_to_use=None,
+    n_splits=5,
+    save_best_model=True,
+    train_test_split_ratio=0.8,
+    gap=24,
+):
+    """
+    Perform walk-forward validation with hyperparameter optimization for regression models, and saves the best models and evaluation metrics.
+
+    Args:
+        data (pd.DataFrame): Time-series data with datetime index.
+        target_column (str): Name of the target column (e.g., "lmp_volatility").
+        model_save_path (str): Path to save models.
+        models_to_use (list of str): List of model names to run (e.g., ["decision_tree", "random_forest", "lightgbm"]).
+        n_splits (int, optional): Number of splits for TimeSeriesSplit. Default to 5.
+        save_best_model (bool, optional): Whether to save the best model for each type. Defaults to True.
+        train_test_split_ratio (float, optional): The percentage of data allocated as the train set. Defaults to 0.8.
+        gap (int, optional): Number of unique time points (in hours) to skip between training and testing sets. Defaults to 24 hours.
+    """
+    # Ensure data is sorted
+    data = data.sort_index()
+    unique_times = data.index.unique()
+    split_idx = int(len(unique_times) * train_test_split_ratio)
+    train_times = unique_times[:split_idx]
+    test_times = unique_times[split_idx:]
+
+    train_data = data.loc[data.index.isin(train_times)]
+    test_data = data.loc[data.index.isin(test_times)]
+
+    X_train = train_data.drop(columns=[target_column])
+    y_train = train_data[target_column]
+    X_test = test_data.drop(columns=[target_column])
+    y_test = test_data[target_column]
+
+    model_names = models_to_use or ["decision_tree", "random_forest", "lightgbm"]
+
+    for model_name in model_names:
+        best_model = None
+        best_rmse = float("inf")
+        splitter = custom_time_series_split_no_overlap(train_data, n_splits, gap=gap)
+        for fold, (train_idx, test_idx) in enumerate(splitter, start=1):
+            print(f"\n____ Fold {fold} - {model_name} ____")
+            X_fold_train, X_fold_test = X_train.loc[train_idx], X_train.loc[test_idx]
+            y_fold_train, y_fold_test = y_train.loc[train_idx], y_train.loc[test_idx]
+            candidate_model = optimize_hyperparameters_regression(
+                model_name, X_fold_train, y_fold_train
+            )
+            y_pred = candidate_model.predict(X_fold_test)
+            rmse = np.sqrt(mean_squared_error(y_fold_test, y_pred))
+            print(f"Fold {fold} - RMSE: {rmse:.2f}")
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_model = candidate_model
+        if best_model:
+            y_test_pred = best_model.predict(X_test)
+            test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+            print(f"Hold-out Test - {model_name}: RMSE = {test_rmse:.2f}")
+        if save_best_model and best_model:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_name = f"{model_name}_{target_column}_{timestamp}.pkl"
+            save_path = os.path.join(model_save_path, target_column, file_name)
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            joblib.dump(best_model, save_path)
+            print(f"Best {model_name} saved at: {save_path}")
+            metadata = {
+                "best_rmse": best_rmse,
+                "test_rmse": test_rmse,
+                "save_path": save_path,
+                "training_time": timestamp,
+                "features": X_train.columns.tolist(),
+                "date_range": {
+                    "train_start": train_times.min().strftime("%Y-%m-%d"),
+                    "train_end": train_times.max().strftime("%Y-%m-%d"),
+                    "test_start": test_times.min().strftime("%Y-%m-%d"),
+                    "test_end": test_times.max().strftime("%Y-%m-%d"),
+                },
+            }
+            metadata_path = os.path.join(
+                model_save_path,
+                target_column,
+                f"{model_name}_metadata_{timestamp}.json",
+            )
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=4)
+            print(f"Metadata for {model_name} saved at: {metadata_path}")
+
+
+def custom_time_series_split_no_overlap(data, n_splits, gap=24):
     """
     Custom Time Series Split that prevents overlap of grouped data by unique time points.
 
     Args:
         data (pd.DataFrame): Input DataFrame.
         n_splits (int): Number of splits.
-        gap (int, optional): Number of unique time points (in hours) to skip between training and testing sets. Defaults to 0.
+        gap (int, optional): Number of unique time points (in hours) to skip between training and testing sets. Defaults to 24 hours.
 
     Yields:
         train_indices (np.array): Indices for training data.
@@ -1774,77 +2273,3 @@ def custom_time_series_split_no_overlap(data, n_splits, gap=0):
         train_indices = data.loc[train_time_points].index
         test_indices = data.loc[test_time_points].index
         yield train_indices, test_indices
-
-
-def walk_forward_validation_et(
-    data,
-    target_column,
-    models_to_use=None,
-    n_splits=5,
-):
-    """Perform walk-forward validation with hyperparameter optimization for multiple models.
-
-    Args:
-        data (pd.DataFrame): Time-series data with datetime index.
-        target_column (str): Name of the target column (Ex. "emergency_triggered").
-        models_to_use (list of str): List of model names to run, specifically ["decision_tree", "random_forest", "lightgbm"]. Defaults to None.
-        n_splits (int, optional): Number of splits for TimeSeriesSplit. Default to 5.
-
-    Returns:
-        dict: Results for each model, including metrics for each fold and overall performance.
-    """
-    data = data.sort_index()
-    X = data.drop(columns=[target_column])
-    y = data[target_column]
-    # tscv = TimeSeriesSplit(n_splits=n_splits, gap=24)
-    splitter = custom_time_series_split_no_overlap(data, n_splits, gap=24)
-    model_names = models_to_use
-    results = {model_name: [] for model_name in model_names}
-
-    for fold, (train_idx, test_idx) in enumerate(splitter, start=1):
-        print(f"\n____ Fold {fold} ____")
-        X_train, X_test = X.loc[train_idx], X.loc[test_idx]
-        y_train, y_test = y.loc[train_idx], y.loc[test_idx]
-        for model_name in model_names:
-            print(f"Optimizing {model_name}...")
-            best_model = optimize_hyperparameters_et(model_name, X_train, y_train)
-            y_pred = best_model.predict(X_test)
-            report = classification_report(y_test, y_pred, output_dict=True)
-            results[model_name].append(
-                {
-                    "fold": fold,
-                    "model": best_model,
-                    "f1_score": report["weighted avg"]["f1-score"],
-                    "y_test": y_test,
-                    "y_pred": y_pred,
-                }
-            )
-
-            print(
-                f"Fold {fold} - {model_name}: F1-Score = {report['1']['f1-score']:.2f}"
-            )
-
-    return results
-
-
-def display_results_et(results):
-    """Displays the results gathered from walk_forward_validation_et.
-
-    Args:
-        results (dict): Results for each model, including metrics for each fold and overall performance.
-    """
-    folds = []
-    f1_scores = []
-    for dicts in results["decision_tree"]:
-        folds.append(dicts["fold"])
-        f1_scores.append(dicts["f1_score"])
-    f1_scores
-
-    plt.figure(figsize=(8, 5))
-    plt.plot(folds, f1_scores, marker="o", linestyle="-", color="blue")
-    plt.title("Decision Tree F1-Scores Across Folds")
-    plt.xlabel("Fold")
-    plt.ylabel("F1-Score")
-    plt.ylim(0.9, 1.1)
-    plt.grid()
-    plt.show()
