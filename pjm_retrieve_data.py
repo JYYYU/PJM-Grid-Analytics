@@ -398,8 +398,8 @@ class PJMMonthlyFTRBidsFetcher(PJMHeaderSetUp):
         logging.info(f"Removed True-up bids from {market_name}")
         return filtered_df
 
-    def fetch_data(self, output_file_path, file_name, **kwargs):
-        """Fetch FTR bids data based on the initialized configuration. This method fetches data across a range of months if `date_range` was specified during initialization,
+    def save_data(self, output_file_path, file_name, **kwargs):
+        """Saves FTR bids data based on the initialized configuration into the provided output_file_path and file_name. This method fetches data across a range of months if `date_range` was specified during initialization,
         or for a single month if `market_name` was provided OR if either start_datetime or end_datetime is provided.
 
         Args:
@@ -434,6 +434,38 @@ class PJMMonthlyFTRBidsFetcher(PJMHeaderSetUp):
             )
             final_df.to_parquet(file_path, index=False, engine="pyarrow")
             logging.info(f"Data saved to {output_file_path}")
+
+    def fetch_data(self, **kwargs):
+        """Fetch FTR bids data based on the initialized configuration. This method fetches data across a range of months if `date_range` was specified during initialization,
+        or for a single month if `market_name` was provided OR if either start_datetime or end_datetime is provided.
+
+        Returns:
+            pd.DataFrame: A dataframe containing monthly FTR Bids for the defined parameters.
+        """
+        if self.date_range_mode:
+            current_date = self.start_date
+            final_df = pd.DataFrame()
+
+            while current_date <= self.end_date:
+                market_name = current_date.strftime("%b %Y ") + "Auction"
+                logging.info(f"Fetching data for market_name: {market_name}")
+
+                monthly_data = self.fetch_all_monthly_ftr_bids_for_market(
+                    market_name, **kwargs
+                )
+                final_df = pd.concat(
+                    [final_df, monthly_data], axis=0, ignore_index=True
+                )
+                current_date += relativedelta(months=1)
+            logging.info("All data fetched.")
+            return final_df
+        else:
+            logging.info(f"Fetching data for market_name: {self.market_name}")
+            final_df = self.fetch_all_monthly_ftr_bids_for_market(
+                self.market_name, **kwargs
+            )
+            logging.info("All data fetched.")
+            return final_df
 
 
 class PJMMonthlyFTRZonalLmps(PJMHeaderSetUp):
@@ -716,7 +748,7 @@ class PJMMonthlyFTRZonalLmps(PJMHeaderSetUp):
                 logging.info(f"Completed downloading data for range: {end_dte}")
         return all_data_df.reset_index(drop=True)
 
-    def fetch_data(self, output_file_path, file_name, **kwargs):
+    def save_data(self, output_file_path, file_name, **kwargs):
         """Takes the dataframe of data concatenates from all batches and outputs it into the provided file path under the provided file name.
 
         Args:
@@ -766,6 +798,51 @@ class PJMMonthlyFTRZonalLmps(PJMHeaderSetUp):
         final_df.to_parquet(file_path, index=False, engine="pyarrow")
         logging.info(f"Data saved to {file_path}")
 
+    def fetch_data(self, **kwargs):
+        """Takes the dataframe of data concatenates from all batches and returns it.
+
+        Returns:
+            pd.DataFrame: A dataframe containing monthly FTR Zonal LMPs for the defined parameters.
+        """
+        if self.date_range_mode:
+            date_ranges = self.build_date_ranges(self.start_date, self.upper_bound)
+            final_df = pd.DataFrame()
+
+            for date_rng in date_ranges:
+                logging.info(f"Fetching data for range: {date_rng}")
+                current_data = self.fetch_all_ftr_zonal_lmp_for_daterange(
+                    start_dte=date_rng, end_dte=self.end_date, **kwargs
+                )
+                final_df = pd.concat(
+                    [final_df, current_data], axis=0, ignore_index=True
+                )
+        else:
+            logging.info("Fetching data...")
+            final_df = self.fetch_all_ftr_zonal_lmp_for_daterange(
+                start_dte=self.start_date, end_dte=self.end_date, **kwargs
+            )
+
+        datetime_columns = [
+            "datetime_beginning_utc",
+            "datetime_beginning_ept",
+            "datetime_ending_utc",
+            "datetime_ending_ept",
+        ]
+        for col in datetime_columns:
+            if col in final_df.columns:
+                final_df[col] = pd.to_datetime(final_df[col])
+
+        if self.upper_bound is not None:
+            final_df = final_df[final_df["datetime_ending_ept"] <= self.upper_bound]
+            final_df.reset_index(drop=True, inplace=True)
+        if self.remove_dsl:
+            final_df = final_df[
+                final_df["datetime_beginning_ept"] < final_df["datetime_ending_ept"]
+            ]
+            final_df = self._treat_day_light_saving(final_df)
+        logging.info("All data fetched.")
+        return final_df
+
 
 class PJMDailyGenerationCapacity(PJMHeaderSetUp):
     """A class to retrieve daily generation capacity."""
@@ -777,7 +854,7 @@ class PJMDailyGenerationCapacity(PJMHeaderSetUp):
 
         Args:
             start_datetime (datetime, optional): A datetime object of the start date. Defaults to None.
-            end_datetime (datetime, optional): A datetime object of the end date; When included with a start_datetime, this datetime will be EXCLUSIVE in the data retrieved. Defaults to None.
+            end_datetime (datetime, optional): A datetime object of the end date; When included with a start_datetime, this datetime will be INCLUSIVE in the data retrieved. Defaults to None.
             is_range (bool, optional): Determines if the retrieved data is from a date range (True) or a static date (False). Defaults to True.
             row_count (int, optional): Number of rows to fetch per request. Defaults to 50000.
         """
@@ -842,8 +919,8 @@ class PJMDailyGenerationCapacity(PJMHeaderSetUp):
                 f"Failed to retrieve data from {self._settings_url}: {response.status_code} - {response.text}"
             )
 
-    def fetch_data(self, output_file_path, file_name, **kwargs):
-        """Fetches daily generation capacity data based on the initialized configuration. This method fetches data across a range of months if `date_range` was specified during initialization,
+    def save_data(self, output_file_path, file_name, **kwargs):
+        """Saves daily generation capacity data based on the initialized configuration into the provided output_file_path and file_name. This method fetches data across a range of months if `date_range` was specified during initialization,
         or for a single day if is_range is set False.
 
         Args:
@@ -887,10 +964,54 @@ class PJMDailyGenerationCapacity(PJMHeaderSetUp):
                 final_df[col] = pd.to_datetime(final_df[col])
 
         if self.end_date is not None:
-            final_df = final_df[final_df["bid_datetime_beginning_ept"] < self.end_date]
+            final_df = final_df[final_df["bid_datetime_beginning_ept"] <= self.end_date]
             final_df.reset_index(drop=True, inplace=True)
         final_df.to_parquet(file_path, index=False, engine="pyarrow")
         logging.info(f"Data saved to {file_path}")
+
+    def fetch_data(self, **kwargs):
+        """Fetches daily generation capacity data based on the initialized configuration. This method fetches data across a range of months if `date_range` was specified during initialization,
+        or for a single day if is_range is set False.
+
+        Returns:
+            pd.DataFrame: A dataframe containing daily Generation Capacity data for the defined parameters.
+        """
+        final_df = pd.DataFrame()
+
+        empty = False
+        count = 1
+        logging.info("Checking data availability.")
+        data_check = self.get_daily_generation_capacity(
+            start_dte=self.start_date, row_count=1, **kwargs
+        )
+        if data_check.empty:
+            logging.warning("No data found.")
+            final_df = pd.DataFrame()
+        else:
+            logging.info(f"Fetching Daily Generation Capacity from {self.start_date}.")
+            while not empty:
+                monthly_data = self.get_daily_generation_capacity(
+                    start_dte=self.start_date,
+                    start_row=(count - 1) * self.row_count + 1,
+                    **kwargs,
+                )
+                if monthly_data.empty:
+                    break
+                final_df = pd.concat(
+                    [final_df, monthly_data], axis=0, ignore_index=True
+                )
+                count += 1
+
+        datetime_columns = ["bid_datetime_beginning_ept"]
+        for col in datetime_columns:
+            if col in final_df.columns:
+                final_df[col] = pd.to_datetime(final_df[col])
+
+        if self.end_date is not None:
+            final_df = final_df[final_df["bid_datetime_beginning_ept"] <= self.end_date]
+            final_df.reset_index(drop=True, inplace=True)
+        logging.info("All data fetched.")
+        return final_df
 
 
 class PJMForecastedGenerationOutages(PJMHeaderSetUp):
@@ -903,7 +1024,7 @@ class PJMForecastedGenerationOutages(PJMHeaderSetUp):
 
         Args:
             start_datetime (datetime, optional): A datetime object of the start date. Defaults to None.
-            end_datetime (datetime, optional): A datetime object of the end date; When included with a start_datetime, this datetime will be EXCLUSIVE in the data retrieved. Defaults to None.
+            end_datetime (datetime, optional): A datetime object of the end date; When included with a start_datetime, this datetime will be INCLUSIVE in the data retrieved. Defaults to None.
             is_range (bool, optional): Determines if the retrieved data is from a date range (True) or a static date (False). Defaults to True.
             row_count (int, optional): Number of rows to fetch per request. Defaults to 50000.
         """
@@ -959,7 +1080,6 @@ class PJMForecastedGenerationOutages(PJMHeaderSetUp):
             "startRow": start_row,
         }
         params.update(kwargs)
-        print(params)
         response = requests.get(self.base_url, headers=headers, params=params)
         if response.status_code == 200:
             data = response.json()
@@ -969,8 +1089,8 @@ class PJMForecastedGenerationOutages(PJMHeaderSetUp):
                 f"Failed to retrieve data from {self._settings_url}: {response.status_code} - {response.text}"
             )
 
-    def fetch_data(self, output_file_path, file_name, **kwargs):
-        """Fetches forecasted generation outages for the next ninety days capacity data based on the initialized configuration. This method fetches data across a range of months if `date_range` was specified during initialization,
+    def save_data(self, output_file_path, file_name, **kwargs):
+        """Saves forecasted generation outages for the next ninety days capacity data based on the initialized configuration into the provided output_file_path and file_name. This method fetches data across a range of months if `date_range` was specified during initialization,
         or for a single day if is_range is set False.
 
         Args:
@@ -1016,10 +1136,56 @@ class PJMForecastedGenerationOutages(PJMHeaderSetUp):
                 final_df[col] = pd.to_datetime(final_df[col])
 
         if self.end_date is not None:
-            final_df = final_df[final_df["forecast_date"] < self.end_date]
+            final_df = final_df[final_df["forecast_date"] <= self.end_date]
             final_df.reset_index(drop=True, inplace=True)
         final_df.to_parquet(file_path, index=False, engine="pyarrow")
         logging.info(f"Data saved to {file_path}")
+
+    def fetch_data(self, **kwargs):
+        """Fetches forecasted generation outages for the next ninety days capacity data based on the initialized configuration. This method fetches data across a range of months if `date_range` was specified during initialization,
+        or for a single day if is_range is set False.
+
+        Returns:
+            pd.DataFrame: A dataframe containing forecasted generation outages for the defined parameters.
+        """
+        final_df = pd.DataFrame()
+
+        empty = False
+        count = 1
+        logging.info("Checking data availability.")
+        data_check = self.get_forecasted_generation_outages(
+            start_dte=self.start_date, row_count=1, **kwargs
+        )
+        if data_check.empty:
+            logging.warning("No data found.")
+            final_df = pd.DataFrame()
+        else:
+            logging.info(
+                f"Fetching Forecasted Generation Outages for the next Ninety Days from {self.start_date}."
+            )
+            while not empty:
+                monthly_data = self.get_forecasted_generation_outages(
+                    start_dte=self.start_date,
+                    start_row=(count - 1) * self.row_count + 1,
+                    **kwargs,
+                )
+                if monthly_data.empty:
+                    break
+                final_df = pd.concat(
+                    [final_df, monthly_data], axis=0, ignore_index=True
+                )
+                count += 1
+
+        datetime_columns = ["forecast_execution_date_ept", "forecast_date"]
+        for col in datetime_columns:
+            if col in final_df.columns:
+                final_df[col] = pd.to_datetime(final_df[col])
+
+        if self.end_date is not None:
+            final_df = final_df[final_df["forecast_date"] <= self.end_date]
+            final_df.reset_index(drop=True, inplace=True)
+        logging.info("All data fetched.")
+        return final_df
 
 
 class PJMGenerationOutageForSevenDays(PJMHeaderSetUp):
@@ -1032,7 +1198,7 @@ class PJMGenerationOutageForSevenDays(PJMHeaderSetUp):
 
         Args:
             start_datetime (datetime, optional): A datetime object of the start date. Defaults to None.
-            end_datetime (datetime, optional): A datetime object of the end date; When included with a start_datetime, this datetime will be EXCLUSIVE in the data retrieved. Defaults to None.
+            end_datetime (datetime, optional): A datetime object of the end date; When included with a start_datetime, this datetime will be INCLUSIVE in the data retrieved. Defaults to None.
             is_range (bool, optional): Determines if the retrieved data is from a date range (True) or a static date (False). Defaults to True.
             row_count (int, optional): Number of rows to fetch per request. Defaults to 50000.
         """
@@ -1097,8 +1263,8 @@ class PJMGenerationOutageForSevenDays(PJMHeaderSetUp):
                 f"Failed to retrieve data from {self._settings_url}: {response.status_code} - {response.text}"
             )
 
-    def fetch_data(self, output_file_path, file_name, **kwargs):
-        """Fetches scheduled and unplanned generation outages data based on the initialized configuration. This method fetches data across a range of months if `date_range` was specified during initialization,
+    def save_data(self, output_file_path, file_name, **kwargs):
+        """Saves scheduled and unplanned generation outages data based on the initialized configuration into the provided output_file_path and file_name. This method fetches data across a range of months if `date_range` was specified during initialization,
         or for a single day if is_range is set False.
 
         Args:
@@ -1144,10 +1310,56 @@ class PJMGenerationOutageForSevenDays(PJMHeaderSetUp):
                 final_df[col] = pd.to_datetime(final_df[col])
 
         if self.end_date is not None:
-            final_df = final_df[final_df["forecast_date"] < self.end_date]
+            final_df = final_df[final_df["forecast_date"] <= self.end_date]
             final_df.reset_index(drop=True, inplace=True)
         final_df.to_parquet(file_path, index=False, engine="pyarrow")
         logging.info(f"Data saved to {file_path}")
+
+    def fetch_data(self, **kwargs):
+        """Fetches scheduled and unplanned generation outages data based on the initialized configuration. This method fetches data across a range of months if `date_range` was specified during initialization,
+        or for a single day if is_range is set False.
+
+        Returns:
+            pd.DataFrame: A dataframe containing monthly FTR Bids for the defined parameters.
+        """
+        final_df = pd.DataFrame()
+
+        empty = False
+        count = 1
+        logging.info("Checking data availability.")
+        data_check = self.get_generation_outages_by_seven_days(
+            start_dte=self.start_date, row_count=1, **kwargs
+        )
+        if data_check.empty:
+            logging.warning("No data found.")
+            final_df = pd.DataFrame()
+        else:
+            logging.info(
+                f"Fetching Generation Outages for the next Seven Days from {self.start_date}_{self.end_date}."
+            )
+            while not empty:
+                monthly_data = self.get_generation_outages_by_seven_days(
+                    start_dte=self.start_date,
+                    start_row=(count - 1) * self.row_count + 1,
+                    **kwargs,
+                )
+                if monthly_data.empty:
+                    break
+                final_df = pd.concat(
+                    [final_df, monthly_data], axis=0, ignore_index=True
+                )
+                count += 1
+
+        datetime_columns = ["forecast_execution_date_ept", "forecast_date"]
+        for col in datetime_columns:
+            if col in final_df.columns:
+                final_df[col] = pd.to_datetime(final_df[col])
+
+        if self.end_date is not None:
+            final_df = final_df[final_df["forecast_date"] <= self.end_date]
+            final_df.reset_index(drop=True, inplace=True)
+        logging.info("All data fetched.")
+        return final_df
 
 
 class PJMPnodesSearch(PJMHeaderSetUp):
@@ -1194,8 +1406,8 @@ class PJMPnodesSearch(PJMHeaderSetUp):
                 f"Failed to retrieve data from {self._settings_url}: {response.status_code} - {response.text}"
             )
 
-    def fetch_data(self, output_file_path, file_name, **kwargs):
-        """Fetch all master information on pnodes (pricing nodes) data.
+    def save_data(self, output_file_path, file_name, **kwargs):
+        """Saves all master information on pnodes (pricing nodes) data into the provided output_file_path and file_name.
 
         Args:
             output_file_path (str): File path to save parquet file.
@@ -1225,3 +1437,29 @@ class PJMPnodesSearch(PJMHeaderSetUp):
         final_df["effective_date"] = pd.to_datetime(final_df["effective_date"])
         final_df.to_parquet(file_path, index=False, engine="pyarrow")
         logging.info(f"Data saved to {output_file_path}")
+
+    def fetch_data(self, **kwargs):
+        """Fetch all master information on pnodes (pricing nodes) data.
+
+        Returns:
+            pd.DataFrame: A dataframe containing master information on pricing nodes (pnodes).
+        """
+        empty = False
+        count = 1
+        logging.info("Checking data availability.")
+        data_check = self.get_pnode_data(row_count=1, **kwargs)
+        if data_check.empty:
+            logging.warning("No data found.")
+            final_df = pd.DataFrame()
+        logging.info("Fetching pricing node data.")
+        final_df = pd.DataFrame()
+        while not empty:
+            pnode_data = self.get_pnode_data(start_row=(count - 1) * self.row_count + 1)
+            if pnode_data.empty:
+                break
+            final_df = pd.concat([final_df, pnode_data], axis=0, ignore_index=True)
+            count += 1
+
+        final_df["effective_date"] = pd.to_datetime(final_df["effective_date"])
+        logging.info("All data fetched.")
+        return final_df
