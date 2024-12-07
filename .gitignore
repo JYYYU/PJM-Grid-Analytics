@@ -1,0 +1,17 @@
+# Ignore macOS system files
+.DS_Store
+
+# Ignore temporary files and directories
+__pycache__/
+temp.ipynb
+grid_dashboard_layout.ipynb
+grid_dashboard.py
+# Ignore dataframes
+dataframes/
+
+# Ignore models and their contents
+models/
+
+# Ignore workspace settings
+Grid_Analytics.code-workspace
+delete_later/
