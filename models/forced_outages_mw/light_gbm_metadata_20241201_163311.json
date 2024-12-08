@@ -1,7 +1,7 @@
 {
     "best_rmse": 764.8136360515556,
     "test_rmse": 825.0043281412107,
-    "save_path": "./models/forced_outages_mw/lightgbm_forced_outages_mw_20241201_163311.pkl",
+    "save_path": "./models/forced_outages_mw/light_gbm_forced_outages_mw_20241201_163311.pkl",
     "training_time": "20241201_163311",
     "features": [
         "month",

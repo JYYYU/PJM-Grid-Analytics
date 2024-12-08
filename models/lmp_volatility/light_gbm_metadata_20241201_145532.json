@@ -1,7 +1,7 @@
 {
     "best_rmse": 1.332069366329004,
     "test_rmse": 1.8549624049411717,
-    "save_path": "./models/lmp_volatility/lightgbm_lmp_volatility_20241201_145532.pkl",
+    "save_path": "./models/lmp_volatility/light_gbm_lmp_volatility_20241201_145532.pkl",
     "training_time": "20241201_145532",
     "features": [
         "pnode_id",
