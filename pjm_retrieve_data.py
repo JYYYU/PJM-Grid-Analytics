@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+import os
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from multiprocessing import Pool, cpu_count
@@ -406,10 +407,7 @@ class PJMMonthlyFTRBidsFetcher(PJMHeaderSetUp):
             output_file_path (str): File path to save parquet file.
             file_name (str): Name of the file.
         """
-        if output_file_path[-1] == "/":
-            file_path = f"{output_file_path}{file_name}.parquet"
-        else:
-            file_path = f"{output_file_path}/{file_name}.parquet"
+        file_path = os.path.join(output_file_path, f"{file_name}.parquet")
         if self.date_range_mode:
             current_date = self.start_date
             final_df = pd.DataFrame()
@@ -755,10 +753,7 @@ class PJMMonthlyFTRZonalLmps(PJMHeaderSetUp):
             output_file_path (str): File path to save parquet file.
             file_name (str): Name of the file.
         """
-        if output_file_path[-1] == "/":
-            file_path = f"{output_file_path}{file_name}.parquet"
-        else:
-            file_path = f"{output_file_path}/{file_name}.parquet"
+        file_path = os.path.join(output_file_path, f"{file_name}.parquet")
         if self.date_range_mode:
             date_ranges = self.build_date_ranges(self.start_date, self.upper_bound)
             final_df = pd.DataFrame()
@@ -927,10 +922,7 @@ class PJMDailyGenerationCapacity(PJMHeaderSetUp):
             output_file_path (str): File path to save parquet file.
             file_name (str): Name of the file.
         """
-        if output_file_path[-1] == "/":
-            file_path = f"{output_file_path}{file_name}.parquet"
-        else:
-            file_path = f"{output_file_path}/{file_name}.parquet"
+        file_path = os.path.join(output_file_path, f"{file_name}.parquet")
 
         final_df = pd.DataFrame()
 
@@ -1097,10 +1089,7 @@ class PJMForecastedGenerationOutages(PJMHeaderSetUp):
             output_file_path (str): File path to save parquet file.
             file_name (str):  Name of the file.
         """
-        if output_file_path[-1] == "/":
-            file_path = f"{output_file_path}{file_name}.parquet"
-        else:
-            file_path = f"{output_file_path}/{file_name}.parquet"
+        file_path = os.path.join(output_file_path, f"{file_name}.parquet")
 
         final_df = pd.DataFrame()
 
@@ -1271,10 +1260,7 @@ class PJMGenerationOutageForSevenDays(PJMHeaderSetUp):
             output_file_path (str): File path to save parquet file.
             file_name (str): Name of the file.
         """
-        if output_file_path[-1] == "/":
-            file_path = f"{output_file_path}{file_name}.parquet"
-        else:
-            file_path = f"{output_file_path}/{file_name}.parquet"
+        file_path = os.path.join(output_file_path, f"{file_name}.parquet")
 
         final_df = pd.DataFrame()
 
@@ -1413,10 +1399,7 @@ class PJMPnodesSearch(PJMHeaderSetUp):
             output_file_path (str): File path to save parquet file.
             file_name (str): Name of the file.
         """
-        if output_file_path[-1] == "/":
-            file_path = f"{output_file_path}{file_name}.parquet"
-        else:
-            file_path = f"{output_file_path}/{file_name}.parquet"
+        file_path = os.path.join(output_file_path, f"{file_name}.parquet")
 
         empty = False
         count = 1
