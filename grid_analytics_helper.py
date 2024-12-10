@@ -19,6 +19,7 @@ from lightgbm import LGBMClassifier, LGBMRegressor
 from sklearn.metrics import classification_report, mean_squared_error
 from sklearn.preprocessing import OneHotEncoder
 
+
 #######################################################################################################################################
 ### Merge Data ###
 #######################################################################################################################################
@@ -363,6 +364,29 @@ def create_lmp_volatility(df, n_hours_window=24):
         raise ValueError(
             "'pnode_name', 'datetime_beginning_ept', or 'lmp_delta' are not in the dataframe."
         )
+
+
+def feature_gen_set_up(df, n_hours_window=24, threshold=0.95):
+    """Wraps all the feature generation functionality into one.
+
+    Args:
+        df (pd.DataFrame): Dataframe containing the merged data from the lmp, generation capacity, and outage data (from merge_historical_data).
+        n_hours_window (int, optional): Number of hours for the rolling window when creating lmp volatility (create_lmp_volatility). Defaults to 24.
+        threshold (float, optional): Percentage of the economic max used to determine when to signal an early warning when creating near emergency indicators (create_near_emergency). Defaults to 0.95.
+
+    Returns:
+        pd.DataFrame: A dataframe containing all the engineered features.
+    """
+    df = create_lmp_delta(df)
+    df = create_lmp_volatility(df)
+    df = create_forced_outage_pct(df)
+    df = create_outage_intensity(df)
+    df = create_capacity_margin(df)
+    df = create_region_stress_ratio(df)
+    df = create_emergency_triggered(df)
+    df = create_near_emergency(df)
+
+    return df
 
 
 #######################################################################################################################################
@@ -3119,16 +3143,16 @@ def optimize_hyperparameters_classification(model_name, X, y):
     """Perform hyperparameter optimization for a given model.
 
     Args:
-        model_name (str): Name of the model ("decision_tree", "random_forest", "lightgbm").
+        model_name (str): Name of the model ("decision_tree", "random_forest", "light_gbm").
         X (pd.DataFrame): Feature data.
         y (pd.Series): Target variable.
 
     Returns:
         model: Best-tuned model.
     """
-    if model_name not in ["decision_tree", "random_forest", "lightgbm"]:
+    if model_name not in ["decision_tree", "random_forest", "light_gbm"]:
         raise ValueError(
-            "Models available are: 'decision_tree', 'random_forest', 'lightgbm'"
+            "Models available are: 'decision_tree', 'random_forest', 'light_gbm'"
         )
 
     if model_name == "decision_tree":
@@ -3162,12 +3186,13 @@ def optimize_hyperparameters_classification(model_name, X, y):
             random_state=42,
         )
 
-    elif model_name == "lightgbm":
+    elif model_name == "light_gbm":
         param_dist = {
             "n_estimators": [50, 100, 200],
             "learning_rate": [0.01, 0.05, 0.1, 0.2],
             "num_leaves": [15, 31, 63],
             "max_depth": [-1, 10, 20],
+            "force_col_wise": True,
         }
         model = RandomizedSearchCV(
             LGBMClassifier(random_state=42),
@@ -3187,16 +3212,16 @@ def optimize_hyperparameters_regression(model_name, X, y):
     """Perform hyperparameter optimization for a given regression model.
 
     Args:
-        model_name (str): Name of the model ("decision_tree", "random_forest", "lightgbm").
+        model_name (str): Name of the model ("decision_tree", "random_forest", "light_gbm")
         X (pd.DataFrame): Feature data.
         y (pd.Series): Target variable.
 
     Returns:
         model: Best-tuned model.
     """
-    if model_name not in ["decision_tree", "random_forest", "lightgbm"]:
+    if model_name not in ["decision_tree", "random_forest", "light_gbm"]:
         raise ValueError(
-            "Models available are: 'decision_tree', 'random_forest', 'lightgbm'"
+            "Models available are: 'decision_tree', 'random_forest', 'light_gbm'"
         )
 
     if model_name == "decision_tree":
@@ -3230,12 +3255,13 @@ def optimize_hyperparameters_regression(model_name, X, y):
             random_state=42,
         )
 
-    elif model_name == "lightgbm":
+    elif model_name == "light_gbm":
         param_dist = {
             "n_estimators": [50, 100, 200],
             "learning_rate": [0.01, 0.05, 0.1, 0.2],
             "num_leaves": [15, 31, 63],
             "max_depth": [-1, 10, 20],
+            "force_col_wise": True,
         }
         model = RandomizedSearchCV(
             LGBMRegressor(random_state=42),
@@ -3267,7 +3293,7 @@ def walk_forward_validation_classification(
         data (pd.DataFrame): Time-series data with datetime index.
         target_column (str): Name of the target column (Ex. "emergency_triggered").
         model_save_path (str): Path to save models.
-        models_to_use (list of str): List of model names to run, specifically ["decision_tree", "random_forest", "lightgbm"]. Defaults to None.
+        models_to_use (list of str): List of model names to run, specifically ["decision_tree", "random_forest", "light_gbm"]. Defaults to None.
         n_splits (int, optional): Number of splits for TimeSeriesSplit. Default to 5.
         save_best_model (bool, optional): Whether to save the best model for each type. Defaults to True.
         train_test_split_ratio (float, optional): The percentage of data allocated as the train set. Defaults to 0.8.
@@ -3308,40 +3334,58 @@ def walk_forward_validation_classification(
                 best_model = candidate_model
             print(f"Fold {fold} - {model_name}: F1-Score = {f1_score:.2f}")
 
-        if best_model:  # eval best model on hold-out test set
+        if best_model:  # Evaluate best model on hold-out test set
             y_test_pred = best_model.predict(X_test)
             test_report = classification_report(y_test, y_test_pred, output_dict=True)
             test_f1_score = test_report["weighted avg"]["f1-score"]
             print(f"Hold-out Test - {model_name}: F1-Score = {test_f1_score:.2f}")
 
-        if save_best_model and best_model:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_name = f"{model_name}_{target_column}_{timestamp}.pkl"
-            save_path = os.path.join(model_save_path, target_column, file_name)
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            joblib.dump(best_model, save_path)
+            print(type(best_model))
 
-            metadata = {
-                "best_f1_score": best_f1_score,
-                "test_f1_score": test_f1_score,
-                "save_path": save_path,
-                "training_time": timestamp,
-                "features": X_train.columns.tolist(),
-                "date_range": {
-                    "train_start": train_times.min().strftime("%Y-%m-%d"),
-                    "train_end": train_times.max().strftime("%Y-%m-%d"),
-                    "test_start": test_times.min().strftime("%Y-%m-%d"),
-                    "test_end": test_times.max().strftime("%Y-%m-%d"),
-                },
-            }
-            metadata_path = os.path.join(
-                model_save_path,
-                target_column,
-                f"{model_name}_metadata_{timestamp}.json",
-            )
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=4)
-            print(f"Metadata for {model_name} saved at: {metadata_path}")
+            if not hasattr(best_model, "predict"):
+                raise ValueError(
+                    "best_model is not a valid model with a 'predict' method."
+                )
+
+            if save_best_model:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                file_name = f"{model_name}_{target_column}_{timestamp}"
+
+                if model_name == "light_gbm":  # Save LightGBM as .txt
+                    save_path = os.path.join(
+                        model_save_path, target_column, f"{file_name}.txt"
+                    )
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    best_model.booster_.save_model(save_path)
+                else:  # Save Scikit-learn models as .pkl
+                    save_path = os.path.join(
+                        model_save_path, target_column, f"{file_name}.pkl"
+                    )
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    print("Second Check: ", type(best_model))
+                    joblib.dump(best_model, save_path)
+
+                metadata = {
+                    "best_f1_score": best_f1_score,
+                    "test_f1_score": test_f1_score,
+                    "save_path": save_path,
+                    "training_time": timestamp,
+                    "features": X_train.columns.tolist(),
+                    "date_range": {
+                        "train_start": train_times.min().strftime("%Y-%m-%d"),
+                        "train_end": train_times.max().strftime("%Y-%m-%d"),
+                        "test_start": test_times.min().strftime("%Y-%m-%d"),
+                        "test_end": test_times.max().strftime("%Y-%m-%d"),
+                    },
+                }
+                metadata_path = os.path.join(
+                    model_save_path,
+                    target_column,
+                    f"{model_name}_metadata_{timestamp}.json",
+                )
+                with open(metadata_path, "w") as f:
+                    json.dump(metadata, f, indent=4)
+                print(f"Metadata for {model_name} saved at: {metadata_path}")
 
 
 def walk_forward_validation_regression(
@@ -3361,7 +3405,7 @@ def walk_forward_validation_regression(
         data (pd.DataFrame): Time-series data with datetime index.
         target_column (str): Name of the target column (e.g., "lmp_volatility").
         model_save_path (str): Path to save models.
-        models_to_use (list of str): List of model names to run (e.g., ["decision_tree", "random_forest", "lightgbm"]).
+        models_to_use (list of str): List of model names to run (e.g., ["decision_tree", "random_forest", "light_gbm"]).
         n_splits (int, optional): Number of splits for TimeSeriesSplit. Default to 5.
         save_best_model (bool, optional): Whether to save the best model for each type. Defaults to True.
         train_test_split_ratio (float, optional): The percentage of data allocated as the train set. Defaults to 0.8.
@@ -3382,7 +3426,7 @@ def walk_forward_validation_regression(
     X_test = test_data.drop(columns=[target_column])
     y_test = test_data[target_column]
 
-    model_names = models_to_use or ["decision_tree", "random_forest", "lightgbm"]
+    model_names = models_to_use or ["decision_tree", "random_forest", "light_gbm"]
 
     for model_name in model_names:
         best_model = None
@@ -3405,34 +3449,48 @@ def walk_forward_validation_regression(
             y_test_pred = best_model.predict(X_test)
             test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
             print(f"Hold-out Test - {model_name}: RMSE = {test_rmse:.2f}")
-        if save_best_model and best_model:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_name = f"{model_name}_{target_column}_{timestamp}.pkl"
-            save_path = os.path.join(model_save_path, target_column, file_name)
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            joblib.dump(best_model, save_path)
-            print(f"Best {model_name} saved at: {save_path}")
-            metadata = {
-                "best_rmse": best_rmse,
-                "test_rmse": test_rmse,
-                "save_path": save_path,
-                "training_time": timestamp,
-                "features": X_train.columns.tolist(),
-                "date_range": {
-                    "train_start": train_times.min().strftime("%Y-%m-%d"),
-                    "train_end": train_times.max().strftime("%Y-%m-%d"),
-                    "test_start": test_times.min().strftime("%Y-%m-%d"),
-                    "test_end": test_times.max().strftime("%Y-%m-%d"),
-                },
-            }
-            metadata_path = os.path.join(
-                model_save_path,
-                target_column,
-                f"{model_name}_metadata_{timestamp}.json",
-            )
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=4)
-            print(f"Metadata for {model_name} saved at: {metadata_path}")
+
+            if not hasattr(best_model, "predict"):
+                raise ValueError(
+                    "best_model is not a valid model with a 'predict' method."
+                )
+            if save_best_model:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                file_name = f"{model_name}_{target_column}_{timestamp}"
+                if model_name == "light_gbm":
+                    save_path = os.path.join(
+                        model_save_path, target_column, f"{file_name}.txt"
+                    )
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    best_model.booster_.save_model(save_path)
+                else:
+                    save_path = os.path.join(
+                        model_save_path, target_column, f"{file_name}.pkl"
+                    )
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    joblib.dump(best_model, save_path)
+
+                metadata = {
+                    "best_rmse": best_rmse,
+                    "test_rmse": test_rmse,
+                    "save_path": save_path,
+                    "training_time": timestamp,
+                    "features": X_train.columns.tolist(),
+                    "date_range": {
+                        "train_start": train_times.min().strftime("%Y-%m-%d"),
+                        "train_end": train_times.max().strftime("%Y-%m-%d"),
+                        "test_start": test_times.min().strftime("%Y-%m-%d"),
+                        "test_end": test_times.max().strftime("%Y-%m-%d"),
+                    },
+                }
+                metadata_path = os.path.join(
+                    model_save_path,
+                    target_column,
+                    f"{model_name}_metadata_{timestamp}.json",
+                )
+                with open(metadata_path, "w") as f:
+                    json.dump(metadata, f, indent=4)
+                print(f"Metadata for {model_name} saved at: {metadata_path}")
 
 
 def custom_time_series_split_no_overlap(data, n_splits, gap=24):
