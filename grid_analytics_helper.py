@@ -3192,10 +3192,9 @@ def optimize_hyperparameters_classification(model_name, X, y):
             "learning_rate": [0.01, 0.05, 0.1, 0.2],
             "num_leaves": [15, 31, 63],
             "max_depth": [-1, 10, 20],
-            "force_col_wise": True,
         }
         model = RandomizedSearchCV(
-            LGBMClassifier(random_state=42),
+            LGBMClassifier(force_col_wise=True, random_state=42),
             param_dist,
             n_iter=20,
             scoring="f1",
@@ -3261,10 +3260,9 @@ def optimize_hyperparameters_regression(model_name, X, y):
             "learning_rate": [0.01, 0.05, 0.1, 0.2],
             "num_leaves": [15, 31, 63],
             "max_depth": [-1, 10, 20],
-            "force_col_wise": True,
         }
         model = RandomizedSearchCV(
-            LGBMRegressor(random_state=42),
+            LGBMRegressor(force_col_wise=True, random_state=42),
             param_dist,
             n_iter=20,
             scoring="neg_mean_squared_error",
