@@ -512,14 +512,14 @@ app.layout = html.Div(
                                             "value": FORCED_OUTAGE_FOLDER,
                                         },
                                     ],
-                                    placeholder="Select a prediction 'feature'.",
+                                    placeholder="Select a Predicted Variable",
                                     style={"width": "50%"},
                                 ),
                                 html.Div(
                                     [
                                         dcc.Dropdown(
                                             id="model-selection-setup",
-                                            placeholder="Select a trained model",
+                                            placeholder="Select a Trained Model",
                                             style={"width": "50%"},
                                         )
                                     ],
@@ -638,7 +638,7 @@ app.layout = html.Div(
                                 ),
                                 dcc.Dropdown(
                                     id="build-models-dataset-selection-setup",
-                                    placeholder="Select dataset",
+                                    placeholder="Select a Dataset",
                                     style={"width": "50%", "marginRight": "0px"},
                                 ),
                                 html.P(
@@ -649,7 +649,7 @@ app.layout = html.Div(
                                         html.Div(
                                             [
                                                 html.Label(
-                                                    "Available Predictors:",
+                                                    "Available Predicted Variables:",
                                                     style={
                                                         "fontWeight": "bold",
                                                         "marginBottom": "10px",
@@ -785,7 +785,7 @@ app.layout = html.Div(
                                     style={"width": "67%", "marginBottom": "20px"},
                                 ),
                                 html.Label(
-                                    "Select a Predictor:",
+                                    "Select a Predicted Variable:",
                                     style={
                                         "fontWeight": "bold",
                                         "marginBottom": "15px",
@@ -807,7 +807,7 @@ app.layout = html.Div(
                                             "value": FORCED_OUTAGE_FOLDER,
                                         },
                                     ],
-                                    placeholder="Select a predictor",
+                                    placeholder="Select a Predicted Variable",
                                     style={"width": "67%", "marginBottom": "20px"},
                                 ),
                                 html.Div(
@@ -825,7 +825,7 @@ app.layout = html.Div(
                                                         ),
                                                         dcc.Dropdown(
                                                             id="forecast-model-selection",
-                                                            placeholder="Select a trained model",
+                                                            placeholder="Select a Trained Model",
                                                             style={"width": "100%"},
                                                         ),
                                                     ],
