@@ -26,10 +26,12 @@ Use state-of-the-art algorithms like Decision Trees, Random Forests, and Gradien
 
 **Limitations:** Weather Data Constraints
 One key limitation in this analysis is the lack of granular weather data, which could enhance the accuracy of congestion risk and price forecasting. Factors such as:
+
 - Wind speeds and direction (critical for renewable generation forecasts)
 - Temperature and humidity (major drivers of demand fluctuations)
 - Rainfall and storms (which can impact outages and transmission performance)
 - Snow and ice accumulation (which can lead to winter-related reliability challenges)
+  
 were not included due to data sourcing challenges. Given the strong correlation between extreme weather events and grid stress, incorporating high-resolution weather data in future iterations could significantly improve forecasting accuracy.
 
 
