@@ -1,6 +1,6 @@
 # Grid Analytics
 
-## PJM Energy Market Analysis and Forecasting 
+### PJM Energy Market Analysis and Forecasting 
 
 This project analyzes historical grid performance data in the PJM energy market to understand price variability, outage impacts, and grid stress. By leveraging advanced data science techniques and machine learning models, this project aims to uncover key insights and predict critical grid conditions.
 
