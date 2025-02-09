@@ -1,11 +1,11 @@
 # Grid Analytics
 
-**PJM Energy Market Analysis and Forecasting**
+## PJM Energy Market Analysis and Forecasting 
 
 This project analyzes historical grid performance data in the PJM energy market to understand price variability, outage impacts, and grid stress. By leveraging advanced data science techniques and machine learning models, this project aims to uncover key insights and predict critical grid conditions.
 
 
-**Project Highlights:**
+### Project Highlights:
 1. Historical Analysis:
 - Understand LMP (Locational Marginal Price) trends and variability across nodes and regions.
 - Examine planned vs. forced outages and their influence on grid performance.
@@ -24,7 +24,7 @@ Use state-of-the-art algorithms like Decision Trees, Random Forests, and Gradien
 5. Actionable Dashboard:
 - Deliver an interactive visualization platform to support maintenance planning, infrastructure upgrades, and grid reliability improvements.
 
-**Limitations:** Weather Data Constraints
+### Limitations: Weather Data Constraints
 One key limitation in this analysis is the lack of granular weather data, which could enhance the accuracy of congestion risk and price forecasting. 
 
 Factors such as:
@@ -37,7 +37,7 @@ Factors such as:
 were not included due to data sourcing challenges. Given the strong correlation between extreme weather events and grid stress, incorporating high-resolution weather data in future iterations could significantly improve forecasting accuracy.
 
 
-**Why This Matters:**
+### Why This Matters:
 As the PJM grid faces rising demand and increasing complexity, this project equips energy stakeholders with the tools to predict, analyze, and mitigate risks. From identifying high-risk nodes to optimizing grid reliability, the insights from this analysis can drive better decision-making and improve market outcomes.
 
 # Acknowledgments:
