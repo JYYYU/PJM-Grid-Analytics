@@ -25,7 +25,9 @@ Use state-of-the-art algorithms like Decision Trees, Random Forests, and Gradien
 - Deliver an interactive visualization platform to support maintenance planning, infrastructure upgrades, and grid reliability improvements.
 
 **Limitations:** Weather Data Constraints
-One key limitation in this analysis is the lack of granular weather data, which could enhance the accuracy of congestion risk and price forecasting. Factors such as:
+One key limitation in this analysis is the lack of granular weather data, which could enhance the accuracy of congestion risk and price forecasting. 
+
+Factors such as:
 
 - Wind speeds and direction (critical for renewable generation forecasts)
 - Temperature and humidity (major drivers of demand fluctuations)
