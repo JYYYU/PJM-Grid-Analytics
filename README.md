@@ -19,7 +19,7 @@ This project analyzes historical grid performance data in the PJM energy market 
 
 4. Machine Learning Predictions:
 - Develop predictive models for emergency-triggered conditions, congestion risks, and LMP price variability.
-Use state-of-the-art algorithms like Decision Trees, Random Forests, and Gradient Boosting for enhanced accuracy.
+Use algorithms like Decision Trees, Random Forests, and Gradient Boosting for enhanced accuracy.
 
 5. Actionable Dashboard:
 - Deliver an interactive visualization platform to support maintenance planning, infrastructure upgrades, and grid reliability improvements.
