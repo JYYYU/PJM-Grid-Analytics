@@ -21,7 +21,7 @@ This project analyzes historical grid performance data in the PJM energy market 
 - Develop predictive models for emergency-triggered conditions, congestion risks, and LMP price variability.
 Use algorithms like Decision Trees, Random Forests, and Gradient Boosting for enhanced accuracy.
 
-5. Actionable Dashboard:
+5. Dashboard:
 - Deliver an interactive visualization platform to support maintenance planning, infrastructure upgrades, and grid reliability improvements.
 
 ### Limitations: Weather Data Constraints
